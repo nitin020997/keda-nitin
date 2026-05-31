@@ -171,6 +171,43 @@ class TestPause:
         assert annotations["autoscaling.keda.sh/paused-replicas"] is None
 
 
+class TestTriggerFields:
+    def test_named_trigger_with_cluster_auth(self, mgr):
+        mgr._api.create_namespaced_custom_object.return_value = _fake_scaled_object("s", "default")
+        spec = ScaledObjectSpec(
+            name="s", namespace="default", target_deployment="worker",
+            triggers=[ScalerTrigger(
+                type="prometheus",
+                metadata={"serverAddress": "http://p:9090", "query": "up"},
+                name="prom-trigger",
+                auth_ref="cluster-auth",
+                auth_kind="ClusterTriggerAuthentication",
+                use_cached_metrics=True,
+                metric_type="AverageValue",
+            )],
+        )
+        mgr.create_scaled_object(spec)
+        body = mgr._api.create_namespaced_custom_object.call_args.kwargs["body"]
+        t = body["spec"]["triggers"][0]
+        assert t["name"] == "prom-trigger"
+        assert t["useCachedMetrics"] is True
+        assert t["metricType"] == "AverageValue"
+        assert t["authenticationRef"]["kind"] == "ClusterTriggerAuthentication"
+
+    def test_trigger_without_optional_fields(self, mgr):
+        mgr._api.create_namespaced_custom_object.return_value = _fake_scaled_object("s", "default")
+        spec = ScaledObjectSpec(
+            name="s", namespace="default", target_deployment="worker",
+            triggers=[ScalerTrigger(type="redis", metadata={"address": "r:6379", "listName": "q"})],
+        )
+        mgr.create_scaled_object(spec)
+        body = mgr._api.create_namespaced_custom_object.call_args.kwargs["body"]
+        t = body["spec"]["triggers"][0]
+        assert "name" not in t
+        assert "useCachedMetrics" not in t
+        assert "authenticationRef" not in t
+
+
 class TestBuiltInRecipes:
     def test_prometheus_recipe(self, mgr):
         mgr._api.create_namespaced_custom_object.return_value = _fake_scaled_object(

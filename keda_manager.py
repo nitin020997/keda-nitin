@@ -16,10 +16,22 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ScalerTrigger:
-    """A single KEDA trigger definition."""
+    """A single KEDA trigger definition.
+
+    name: optional unique name — required when referencing this trigger in ScalingModifiers formula
+    use_cached_metrics: serve last known value instead of querying live
+                        (not supported for cpu/memory/cron — KEDA will reject)
+    metric_type: "Value" | "AverageValue" — overrides the scaler default
+    auth_ref: name of a TriggerAuthentication or ClusterTriggerAuthentication
+    auth_kind: "TriggerAuthentication" (default) | "ClusterTriggerAuthentication"
+    """
     type: str
     metadata: dict[str, str]
+    name: str = ""
     auth_ref: str | None = None
+    auth_kind: str = "TriggerAuthentication"
+    use_cached_metrics: bool = False
+    metric_type: str = ""
 
 
 @dataclass
@@ -426,8 +438,14 @@ class KEDAManager:
         triggers = []
         for t in spec.triggers:
             trigger: dict[str, Any] = {"type": t.type, "metadata": t.metadata}
+            if t.name:
+                trigger["name"] = t.name
+            if t.use_cached_metrics:
+                trigger["useCachedMetrics"] = True
+            if t.metric_type:
+                trigger["metricType"] = t.metric_type
             if t.auth_ref:
-                trigger["authenticationRef"] = {"name": t.auth_ref}
+                trigger["authenticationRef"] = {"name": t.auth_ref, "kind": t.auth_kind}
             triggers.append(trigger)
 
         so_spec: dict[str, Any] = {
