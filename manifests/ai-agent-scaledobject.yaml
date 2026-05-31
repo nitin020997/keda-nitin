@@ -1,0 +1,61 @@
+---
+# Scale workers based on Prometheus pending task queue
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: worker-prometheus-scaler
+  namespace: default
+spec:
+  scaleTargetRef:
+    name: worker
+  minReplicaCount: 0
+  maxReplicaCount: 20
+  cooldownPeriod: 60
+  pollingInterval: 15
+  triggers:
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus-server.monitoring.svc.cluster.local:9090
+        metricName: pending_tasks
+        threshold: "5"
+        query: sum(pending_tasks)
+
+---
+# Scale based on Redis task queue depth
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: worker-redis-scaler
+  namespace: default
+spec:
+  scaleTargetRef:
+    name: worker
+  minReplicaCount: 0
+  maxReplicaCount: 10
+  cooldownPeriod: 30
+  triggers:
+    - type: redis
+      metadata:
+        address: redis-service.default.svc.cluster.local:6379
+        listName: task_queue
+        listLength: "5"
+
+---
+# Business-hours scaling: 9am-6pm IST weekdays
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: worker-cron-scaler
+  namespace: default
+spec:
+  scaleTargetRef:
+    name: worker
+  minReplicaCount: 0
+  maxReplicaCount: 5
+  triggers:
+    - type: cron
+      metadata:
+        timezone: Asia/Kolkata
+        start: "0 9 * * 1-5"
+        end: "0 18 * * 1-5"
+        desiredReplicas: "3"
