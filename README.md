@@ -1,5 +1,9 @@
 # keda-nitin
 
+[![CI](https://github.com/nitin020997/keda-nitin/actions/workflows/ci.yml/badge.svg)](https://github.com/nitin020997/keda-nitin/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)](pyproject.toml)
+
 Full Python implementation for managing all KEDA (Kubernetes-based Event Driven Autoscaling) resources.
 Built by reading the actual [KEDA source code](https://github.com/kedacore/keda).
 
