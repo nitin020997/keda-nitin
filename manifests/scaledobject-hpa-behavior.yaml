@@ -1,0 +1,87 @@
+---
+# ScaledObject with full HPA behavior configuration
+# Controls how fast Kubernetes scales up/down and stabilization windows
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: worker-hpa-behavior
+  namespace: default
+spec:
+  scaleTargetRef:
+    name: worker
+  minReplicaCount: 0
+  maxReplicaCount: 50
+  idleReplicaCount: 0         # true scale-to-zero when no trigger fires
+  cooldownPeriod: 60
+  pollingInterval: 15
+  fallback:
+    failureThreshold: 3
+    replicas: 2
+    behavior: static           # hold 2 replicas if scaler fails
+  advanced:
+    restoreToOriginalReplicaCount: true
+    horizontalPodAutoscalerConfig:
+      name: custom-hpa-name    # override default "keda-hpa-worker"
+                               # use when SO name > 63 chars
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 0    # react immediately on scale-up
+          selectPolicy: Max
+          policies:
+            - type: Pods
+              value: 10
+              periodSeconds: 60            # add up to 10 pods/min
+            - type: Percent
+              value: 100
+              periodSeconds: 60            # or double replicas/min (whichever is max)
+        scaleDown:
+          stabilizationWindowSeconds: 300  # wait 5 min before scaling down
+          selectPolicy: Min
+          policies:
+            - type: Pods
+              value: 2
+              periodSeconds: 60            # remove at most 2 pods/min
+  triggers:
+    - type: prometheus
+      name: task-queue          # named — used in ScalingModifiers formula
+      metadata:
+        serverAddress: http://prometheus-server.monitoring.svc.cluster.local:9090
+        metricName: pending_tasks
+        threshold: "5"
+        query: sum(pending_tasks)
+      useCachedMetrics: false
+      metricType: AverageValue
+
+---
+# ScaledObject with ScalingModifiers formula combining two triggers
+# Named triggers are referenced by name in the formula
+# '??' is the null-coalescing operator — handles when a scaler is failing
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: worker-formula-scaler
+  namespace: default
+spec:
+  scaleTargetRef:
+    name: worker
+  minReplicaCount: 0
+  maxReplicaCount: 30
+  triggers:
+    - type: prometheus
+      name: prom_lag            # referenced in formula
+      metadata:
+        serverAddress: http://prometheus:9090
+        metricName: pending_tasks
+        threshold: "1"
+        query: sum(pending_tasks)
+    - type: redis
+      name: redis_queue         # referenced in formula
+      metadata:
+        address: redis:6379
+        listName: task_queue
+        listLength: "1"
+  advanced:
+    scalingModifiers:
+      formula: "(prom_lag ?? 0) + redis_queue"   # ?? handles scaler failure
+      target: "10"
+      metricType: AverageValue

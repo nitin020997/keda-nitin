@@ -3,7 +3,10 @@
 import pytest
 from unittest.mock import patch
 
-from keda_manager import KEDAManager, ScaledObjectSpec, ScalerTrigger, FallbackSpec, ScalingModifiers
+from keda_manager import (
+    KEDAManager, ScaledObjectSpec, ScalerTrigger, FallbackSpec, ScalingModifiers,
+    HPABehaviorConfig, HPAScalingRules, HPABehaviorPolicy,
+)
 
 
 @pytest.fixture
@@ -206,6 +209,69 @@ class TestTriggerFields:
         assert "name" not in t
         assert "useCachedMetrics" not in t
         assert "authenticationRef" not in t
+
+
+class TestHPABehavior:
+    def test_hpa_custom_name(self, mgr):
+        mgr._api.create_namespaced_custom_object.return_value = _fake_scaled_object("s", "default")
+        spec = ScaledObjectSpec(
+            name="s", namespace="default", target_deployment="worker",
+            triggers=[ScalerTrigger(type="prometheus", metadata={"serverAddress": "http://p:9090", "query": "up"})],
+            hpa_behavior=HPABehaviorConfig(hpa_name="my-custom-hpa"),
+        )
+        mgr.create_scaled_object(spec)
+        body = mgr._api.create_namespaced_custom_object.call_args.kwargs["body"]
+        assert body["spec"]["advanced"]["horizontalPodAutoscalerConfig"]["name"] == "my-custom-hpa"
+
+    def test_hpa_scale_down_stabilization(self, mgr):
+        mgr._api.create_namespaced_custom_object.return_value = _fake_scaled_object("s", "default")
+        spec = ScaledObjectSpec(
+            name="s", namespace="default", target_deployment="worker",
+            triggers=[ScalerTrigger(type="prometheus", metadata={"serverAddress": "http://p:9090", "query": "up"})],
+            hpa_behavior=HPABehaviorConfig(
+                scale_down=HPAScalingRules(
+                    stabilization_window_seconds=300,
+                    select_policy="Min",
+                    policies=[HPABehaviorPolicy(type="Pods", value=2, period_seconds=60)],
+                )
+            ),
+        )
+        mgr.create_scaled_object(spec)
+        body = mgr._api.create_namespaced_custom_object.call_args.kwargs["body"]
+        sd = body["spec"]["advanced"]["horizontalPodAutoscalerConfig"]["behavior"]["scaleDown"]
+        assert sd["stabilizationWindowSeconds"] == 300
+        assert sd["selectPolicy"] == "Min"
+        assert sd["policies"][0] == {"type": "Pods", "value": 2, "periodSeconds": 60}
+
+    def test_hpa_scale_up_and_down(self, mgr):
+        mgr._api.create_namespaced_custom_object.return_value = _fake_scaled_object("s", "default")
+        spec = ScaledObjectSpec(
+            name="s", namespace="default", target_deployment="worker",
+            triggers=[ScalerTrigger(type="redis", metadata={"address": "r:6379", "listName": "q"})],
+            hpa_behavior=HPABehaviorConfig(
+                scale_up=HPAScalingRules(
+                    stabilization_window_seconds=0,
+                    policies=[HPABehaviorPolicy(type="Percent", value=100, period_seconds=60)],
+                ),
+                scale_down=HPAScalingRules(stabilization_window_seconds=300),
+            ),
+        )
+        mgr.create_scaled_object(spec)
+        body = mgr._api.create_namespaced_custom_object.call_args.kwargs["body"]
+        behavior = body["spec"]["advanced"]["horizontalPodAutoscalerConfig"]["behavior"]
+        assert "scaleUp" in behavior
+        assert "scaleDown" in behavior
+        assert behavior["scaleUp"]["stabilizationWindowSeconds"] == 0
+
+    def test_no_hpa_behavior_omits_key(self, mgr):
+        mgr._api.create_namespaced_custom_object.return_value = _fake_scaled_object("s", "default")
+        spec = ScaledObjectSpec(
+            name="s", namespace="default", target_deployment="worker",
+            triggers=[ScalerTrigger(type="redis", metadata={"address": "r:6379", "listName": "q"})],
+        )
+        mgr.create_scaled_object(spec)
+        body = mgr._api.create_namespaced_custom_object.call_args.kwargs["body"]
+        assert "advanced" not in body["spec"]
 
 
 class TestBuiltInRecipes:

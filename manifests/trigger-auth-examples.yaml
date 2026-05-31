@@ -1,0 +1,165 @@
+---
+# 1. Secret-based TriggerAuthentication
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: ta-from-secret
+  namespace: default
+spec:
+  secretTargetRef:
+    - parameter: password
+      name: my-db-secret
+      key: db_password
+    - parameter: username
+      name: my-db-secret
+      key: db_username
+
+---
+# 2. ConfigMap-based TriggerAuthentication
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: ta-from-configmap
+  namespace: default
+spec:
+  configMapTargetRef:
+    - parameter: endpoint
+      name: my-config
+      key: service_url
+
+---
+# 3. Environment variable TriggerAuthentication
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: ta-from-env
+  namespace: default
+spec:
+  env:
+    - parameter: apiKey
+      name: API_KEY
+      containerName: app   # optional: specific container
+
+---
+# 4. File-based TriggerAuthentication
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: ta-from-file
+  namespace: default
+spec:
+  filePath: /etc/keda/auth.json
+
+---
+# 5. Bound ServiceAccount Token
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: ta-bound-sa
+  namespace: default
+spec:
+  boundServiceAccountToken:
+    - parameter: token
+      serviceAccountName: keda-worker-sa
+
+---
+# 6. OAuth2 Client Credentials
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: ta-oauth2
+  namespace: default
+spec:
+  oauth2:
+    type: clientCredentials
+    clientId: my-client-id
+    tokenUrl: https://auth.example.com/oauth/token
+    clientSecret:
+      valueFrom:
+        secretKeyRef:
+          name: oauth-secret
+          key: client_secret
+    scopes:
+      - read
+      - write
+
+---
+# 7. HashiCorp Vault (Kubernetes auth)
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: ta-vault
+  namespace: default
+spec:
+  hashiCorpVault:
+    address: https://vault.example.com
+    authentication: kubernetes
+    role: keda-role
+    mount: kubernetes
+    secrets:
+      - parameter: password
+        path: secret/data/database
+        key: password
+        type: secretV2
+
+---
+# 8. Azure Key Vault with Service Principal
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: ta-azure-kv
+  namespace: default
+spec:
+  azureKeyVault:
+    vaultUri: https://my-vault.vault.azure.net
+    secrets:
+      - parameter: apiKey
+        name: my-api-key
+    credentials:
+      clientId: <client-id>
+      tenantId: <tenant-id>
+      clientSecret:
+        valueFrom:
+          secretKeyRef:
+            name: azure-sp-secret
+            key: clientSecret
+
+---
+# 9. ClusterTriggerAuthentication — usable across all namespaces
+# Uses GCP Workload Identity (pod identity)
+apiVersion: keda.sh/v1alpha1
+kind: ClusterTriggerAuthentication
+metadata:
+  name: gcp-workload-identity
+spec:
+  podIdentity:
+    provider: gcp
+
+---
+# 10. ClusterTriggerAuthentication — AWS with IRSA (pod identity)
+apiVersion: keda.sh/v1alpha1
+kind: ClusterTriggerAuthentication
+metadata:
+  name: aws-irsa-auth
+spec:
+  podIdentity:
+    provider: aws
+    roleArn: arn:aws:iam::123456789012:role/keda-scaler-role
+
+---
+# 11. AWS Secrets Manager
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: ta-aws-secrets
+  namespace: default
+spec:
+  awsSecretManager:
+    secrets:
+      - parameter: password
+        name: my-app/database
+        secretKey: password
+    region: us-east-1
+    podIdentity:
+      provider: aws
+      roleArn: arn:aws:iam::123456789012:role/keda-scaler-role

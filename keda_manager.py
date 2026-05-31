@@ -49,9 +49,12 @@ class FallbackSpec:
 
 @dataclass
 class ScalingModifiers:
-    """Formula-based composite metric scaling.
+    """Formula-based composite metric scaling using expr-lang/expr.
 
-    Lets you combine multiple scaler metrics with an arithmetic formula.
+    Named triggers are referenced by their `name` field directly in the formula.
+    The `??` operator handles failed scalers when fallback behavior is "scalingModifiers"
+    (KEDA passes -1 as placeholder): e.g. formula="(trigger1 ?? 0) + trigger2"
+
     Example: formula="trigger1 + trigger2 * 0.5", target="10"
     """
     formula: str
@@ -61,11 +64,42 @@ class ScalingModifiers:
 
 
 @dataclass
+class HPABehaviorPolicy:
+    """A single HPA scaling policy (maps to autoscalingv2.HPAScalingPolicy)."""
+    type: str           # "Pods" | "Percent"
+    value: int
+    period_seconds: int = 60
+
+
+@dataclass
+class HPAScalingRules:
+    """Scale-up or scale-down rules (maps to autoscalingv2.HPAScalingRules)."""
+    stabilization_window_seconds: int | None = None
+    select_policy: str = "Max"          # "Max" | "Min" | "Disabled"
+    policies: list[HPABehaviorPolicy] = field(default_factory=list)
+
+
+@dataclass
+class HPABehaviorConfig:
+    """Full HPA behavior configuration.
+
+    Corresponds to advanced.horizontalPodAutoscalerConfig in ScaledObject.
+    Controls stabilization windows and scaling rate policies.
+    Custom hpa_name overrides the default "keda-hpa-<so.Name>" — useful when
+    the ScaledObject name would exceed the 63-char Kubernetes label limit.
+    """
+    hpa_name: str = ""                  # custom HPA name; default: keda-hpa-<so.Name>
+    scale_up: HPAScalingRules | None = None
+    scale_down: HPAScalingRules | None = None
+
+
+@dataclass
 class ScaledObjectSpec:
     name: str
     namespace: str
     target_deployment: str
     triggers: list[ScalerTrigger]
+    # ScaledObject name max 63 chars (used as K8s label value scaledobject.keda.sh/name)
     min_replicas: int = 0
     max_replicas: int = 10
     # idle_replica_count is the true "scale to zero" count — KEDA holds this
@@ -79,6 +113,7 @@ class ScaledObjectSpec:
     restore_to_original_replica_count: bool = False
     fallback: FallbackSpec | None = None
     scaling_modifiers: ScalingModifiers | None = None
+    hpa_behavior: HPABehaviorConfig | None = None
     labels: dict[str, str] = field(default_factory=dict)
 
 
@@ -479,6 +514,19 @@ class KEDAManager:
             if m.activation_target:
                 mod["activationTarget"] = m.activation_target
             advanced["scalingModifiers"] = mod
+        if spec.hpa_behavior is not None:
+            hpa_config: dict[str, Any] = {}
+            if spec.hpa_behavior.hpa_name:
+                hpa_config["name"] = spec.hpa_behavior.hpa_name
+            behavior: dict[str, Any] = {}
+            if spec.hpa_behavior.scale_up is not None:
+                behavior["scaleUp"] = self._build_hpa_scaling_rules(spec.hpa_behavior.scale_up)
+            if spec.hpa_behavior.scale_down is not None:
+                behavior["scaleDown"] = self._build_hpa_scaling_rules(spec.hpa_behavior.scale_down)
+            if behavior:
+                hpa_config["behavior"] = behavior
+            if hpa_config:
+                advanced["horizontalPodAutoscalerConfig"] = hpa_config
         if advanced:
             so_spec["advanced"] = advanced
 
@@ -496,3 +544,14 @@ class KEDAManager:
             },
             "spec": so_spec,
         }
+
+    def _build_hpa_scaling_rules(self, rules: HPAScalingRules) -> dict[str, Any]:
+        d: dict[str, Any] = {"selectPolicy": rules.select_policy}
+        if rules.stabilization_window_seconds is not None:
+            d["stabilizationWindowSeconds"] = rules.stabilization_window_seconds
+        if rules.policies:
+            d["policies"] = [
+                {"type": p.type, "value": p.value, "periodSeconds": p.period_seconds}
+                for p in rules.policies
+            ]
+        return d

@@ -1,0 +1,37 @@
+---
+# ScaledJob: creates one Kubernetes Job per Kafka message batch
+# No HPA involved — KEDA creates Jobs directly
+apiVersion: keda.sh/v1alpha1
+kind: ScaledJob
+metadata:
+  name: kafka-worker-job
+  namespace: default
+spec:
+  jobTargetRef:
+    template:
+      spec:
+        containers:
+          - name: worker
+            image: my-worker:latest
+            env:
+              - name: KAFKA_BOOTSTRAP_SERVERS
+                value: kafka-service:9092
+        restartPolicy: Never
+    backoffLimit: 2
+  pollingInterval: 10
+  maxReplicaCount: 50
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  scalingStrategy:
+    strategy: accurate           # accounts for pending pods
+    multipleScalersCalculation: max
+  rollout:
+    strategy: gradual
+    propagationPolicy: foreground
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka-service.default.svc.cluster.local:9092
+        consumerGroup: job-workers
+        topic: work-queue
+        lagThreshold: "1"       # one job per message

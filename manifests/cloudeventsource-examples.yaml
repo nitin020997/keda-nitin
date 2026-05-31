@@ -1,0 +1,50 @@
+---
+# CloudEventSource: emit KEDA scaling events to an HTTP webhook
+apiVersion: eventing.keda.sh/v1alpha1
+kind: CloudEventSource
+metadata:
+  name: keda-events-http
+  namespace: default
+spec:
+  destination:
+    http:
+      uri: https://my-webhook.example.com/keda-events
+  eventSubscription:
+    includedEventTypes:
+      - keda.scaledobject.ready.v1
+      - keda.scaledobject.failed.v1
+
+---
+# CloudEventSource: emit KEDA events to Azure Event Grid
+apiVersion: eventing.keda.sh/v1alpha1
+kind: CloudEventSource
+metadata:
+  name: keda-events-eventgrid
+  namespace: default
+spec:
+  destination:
+    azureEventGridTopic:
+      endpoint: https://my-topic.eastus-1.eventgrid.azure.net/api/events
+  authenticationRef:
+    name: ta-azure-kv
+    kind: TriggerAuthentication
+  eventSubscription:
+    includedEventTypes:
+      - keda.scaledobject.ready.v1
+      - keda.scaledobject.failed.v1
+      - keda.scaledjob.failed.v1
+
+---
+# ClusterCloudEventSource: captures events from ALL namespaces
+apiVersion: eventing.keda.sh/v1alpha1
+kind: ClusterCloudEventSource
+metadata:
+  name: global-keda-events
+spec:
+  clusterName: my-cluster
+  destination:
+    http:
+      uri: https://ops-webhook.example.com/keda
+  eventSubscription:
+    excludedEventTypes:
+      - keda.scaledobject.removed.v1   # skip removal events
